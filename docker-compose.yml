@@ -1,0 +1,154 @@
+
+services:
+  # -----------------------------------------------------------
+  # 1. MongoDB Service
+  #    - NoSQL database for your microservices' data.
+  #    - Data is persisted using a named volume.
+  # -----------------------------------------------------------
+  mongodb:
+    image: mongo:6.0
+    container_name: mongodb
+    ports:
+      - '27017:27017' # Maps host port 27017 to container port 27017.
+                      # This allows your Nest.js apps (and external tools) to connect from your host.
+    volumes:
+      - mongodb_data:/data/db # Named volume for persistent data storage.
+    environment:
+      TZ: 'Africa/Cairo' # Set the timezone for the container. Important for logs/timestamps.
+    restart: unless-stopped # Automatically restart the container unless manually stopped.
+
+  # -----------------------------------------------------------
+  # 2. Zookeeper Service
+  #    - Required by Kafka for distributed coordination.
+  # -----------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3 # Confluent provides reliable Kafka ecosystem images.
+    container_name: zookeeper
+    ports:
+      - '2181:2181' # Zookeeper's default client port.
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181 # Essential for Zookeeper to listen on this port.
+      ZOOKEEPER_TICK_TIME: 2000 # Basic configuration for Zookeeper.
+      TZ: 'Africa/Cairo'
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # 3. Kafka Service
+  #    - Message broker for inter-service communication.
+  #    - Depends on Zookeeper.
+  # -----------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3 # Match version with Zookeeper.
+    container_name: kafka
+    ports:
+      - '9092:9092' # Kafka's default broker port for external connections (from host).
+    environment:
+      KAFKA_BROKER_ID: 1 # Unique ID for this Kafka broker (important in a cluster, but fine as 1 for single instance).
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181 # Tells Kafka where to find Zookeeper (using service name).
+      # Defines how Kafka listens:
+      #   - PLAINTEXT://kafka:29092: Internal listener for other Docker containers (your Nest.js apps) to connect using the service name.
+      #   - PLAINTEXT_HOST://0.0.0.0:9092: External listener for your host machine (or other external clients) to connect.
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      # How Kafka advertises its listeners. CRITICAL for clients to connect correctly from inside/outside Docker network.
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1 # For a single broker, set this to 1.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0 # Speeds up consumer group rebalancing in dev.
+      TZ: 'Africa/Cairo'
+    depends_on:
+      - zookeeper # Ensures Zookeeper starts before Kafka.
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # 4. Keycloak Service
+  #    - Identity and Access Management (IAM) for auth/authz.
+  #    - Uses an embedded H2 database for development purposes.
+  # -----------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.5 # Official Keycloak image.
+    container_name: keycloak
+    ports:
+      - '8080:8080' # Keycloak's default HTTP port for admin console and authentication endpoints.
+      - '8443:8443' # Keycloak's default HTTPS port (recommended for production, but exposed for completeness).
+    volumes:
+      - keycloak_data:/opt/keycloak/data # Persistent storage for Keycloak's configuration and internal DB.
+    environment:
+      KEYCLOAK_ADMIN: admin # Default admin username for the Keycloak console.
+      KEYCLOAK_ADMIN_PASSWORD: admin # Default admin password. **CHANGE THIS FOR PRODUCTION!**
+      KC_DB: dev-file # Use the default H2 file-based database (for development only).
+      KC_HOSTNAME: localhost # Set this to allow Keycloak to generate correct URLs (e.g., for redirect URIs).
+      KC_HTTPS_PORT: 8443 # Port for HTTPS, even if not directly exposed, useful for internal config.
+      KC_HTTP_ENABLED: 'true' # Allow HTTP access for convenience in development.
+      KC_PROXY: passthrough # Important for correct URL generation when behind a reverse proxy (like Docker's internal networking).
+      TZ: 'Africa/Cairo'
+    command: start-dev # Starts Keycloak in a simplified development mode.
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # 5. Auth Microservice (Nest.js)
+  #    - Your authentication microservice.
+  #    - Builds from its local Dockerfile.
+  #    - Connects to MongoDB, Kafka, and Keycloak.
+  # -----------------------------------------------------------
+  auth-microservice:
+    build:
+      context: ./auth-microservice # Path to your auth-microservice directory containing the Dockerfile.
+      dockerfile: Dockerfile # Name of the Dockerfile within that context.
+    container_name: auth-microservice
+    ports:
+      - '3001:8000' # Maps host port 3001 to container port 8000 (assuming your Nest.js app listens on 3000).
+                   # Adjust host port if 3001 is already in use or if you want a different port.
+    environment:
+      # Environment variables your Nest.js app needs to connect to other services.
+      # Use the service names (e.g., 'mongodb', 'kafka', 'keycloak') as hostnames.
+      MONGO_URI: mongodb://mongodb:27017/authdb # Connects to MongoDB service.
+      KAFKA_BROKERS: kafka:29092 # Connects to Kafka's internal listener.
+      KEYCLO_URL: http://keycloak:8080 # Connects to Keycloak service.
+      # Add other specific environment variables required by your auth-microservice
+      # e.g., KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET
+      TZ: 'Africa/Cairo'
+    depends_on:
+      - mongodb
+      - kafka
+      - keycloak # Ensure these services are running before starting the microservice.
+    # Volumes for development: mounts local code for hot-reloading/live changes.
+    volumes:
+      - ./auth-microservice:/app # Mounts your local project directory into the container.
+      - /app/node_modules # Important! Prevents your host's node_modules from overwriting container's.
+    restart: unless-stopped
+
+  # -----------------------------------------------------------
+  # 6. Order Microservice (Nest.js)
+  #    - Your order processing microservice.
+  #    - Builds from its local Dockerfile.
+  #    - Connects to MongoDB, Kafka, and Keycloak.
+  # -----------------------------------------------------------
+  order-microservice:
+    build:
+      context: ./order-microservice # Path to your order-microservice directory.
+      dockerfile: Dockerfile
+    container_name: order-microservice
+    ports:
+      - '3002:5000' # Maps host port 3002 to container port 5000. Adjust as needed.
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/orderdb # Connects to MongoDB service.
+      KAFKA_BROKERS: kafka:29092 # Connects to Kafka's internal listener.
+      KEYCLO_URL: http://keycloak:8080 # Connects to Keycloak service.
+      # Add other specific environment variables required by your order-microservice
+      TZ: 'Africa/Cairo'
+    depends_on:
+      - mongodb
+      - kafka
+      - keycloak
+    volumes:
+      - ./order-microservice:/app
+      - /app/node_modules
+    restart: unless-stopped
+
+# -----------------------------------------------------------
+# Volumes Declaration
+#   - Named volumes for persisting data of MongoDB and Keycloak.
+#   - Data in these volumes will survive container removal.
+# -----------------------------------------------------------
+volumes:
+  mongodb_data:
+  keycloak_data:
