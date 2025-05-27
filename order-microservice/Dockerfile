@@ -15,5 +15,5 @@ WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY package*.json ./
 RUN npm install --omit=dev
-EXPOSE 5000 
+EXPOSE 3000 
 CMD ["node", "dist/main"]

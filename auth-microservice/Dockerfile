@@ -24,7 +24,7 @@ RUN npm install --omit=dev
 
 # Expose the port your Nest.js application listens on.This doesn't actually publish the port, but declares that the container expects to listen on it.
 # It's good documentation and can be used by `docker run -P`.
-EXPOSE 8000 
+EXPOSE 3000 
 
 # Define the command to run your application when the container starts.
 # This assumes your compiled main file is at dist/main.js
