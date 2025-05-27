@@ -24,4 +24,12 @@ export class KeycloakConfigService {
   get publicKeyUrl(): string {
     return `${this.authServerUrl}/realms/${this.realm}/protocol/openid-connect/certs`;
   }
+  
+  get tokenUrl(): string {
+    return `${this.authServerUrl}/realms/${this.realm}/protocol/openid-connect/token`;
+  }
+
+  get userInfoUrl(): string {
+    return `${this.authServerUrl}/realms/${this.realm}/protocol/openid-connect/userinfo`;
+  }
 }
