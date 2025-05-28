@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-
+import { MongooseModule } from '@nestjs/mongoose';
+import { OrderModule } from './order/order.module';
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    MongooseModule.forRoot('mongodb://mongodb:27017/order-management'), // Use the MongoDB service name from docker-compose.yml
+    OrderModule,
+  ],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}
